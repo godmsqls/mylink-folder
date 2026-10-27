@@ -15,12 +15,19 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { GithubIcon, LinkedinIcon, InstagramIcon } from "@/components/SocialIcons";
-import { PROFILE_DATA } from "@/data/profile";
+import { PROFILE_DATA, LinkItem } from "@/data/profile";
 import { LinkCard } from "@/components/LinkCard";
+import { AddLinkDialog } from "@/components/AddLinkDialog";
 
 export default function TossProfilePage() {
   const [activeTab, setActiveTab] = useState<"projects" | "skills" | "links">("projects");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [links, setLinks] = useState<LinkItem[]>(PROFILE_DATA.links);
+
+  const handleAddLink = (newLink: LinkItem) => {
+    setLinks((prev) => [...prev, newLink]);
+    showToast("링크를 추가했어요 ✅");
+  };
 
   const showToast = (message: string) => {
     setToastMessage(message);
@@ -355,11 +362,12 @@ export default function TossProfilePage() {
               </div>
 
               <div className="flex flex-col mt-2 px-1 pb-1">
-                {PROFILE_DATA.links
+                {links
                   .sort((a, b) => a.order - b.order)
                   .map((link) => (
                     <LinkCard key={link.id} link={link} />
                   ))}
+                <AddLinkDialog onAdd={handleAddLink} />
               </div>
 
               {/* 협업 문의 안내 박스 */}
