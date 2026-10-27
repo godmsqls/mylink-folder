@@ -74,8 +74,9 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
     e.preventDefault();
     if (!validate()) return;
 
+    const now = Date.now();
     const newLink: LinkItem = {
-      id: `link-${Date.now()}`,
+      id: `link-${now}`,
       type: form.type,
       title: form.title.trim(),
       subtitle: form.subtitle.trim() || undefined,
@@ -83,7 +84,8 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
       iconName: form.type !== "header" ? form.iconName : undefined,
       badgeText: form.badgeText || undefined,
       isActive: true,
-      order: Date.now(),
+      order: now,
+      createdAt: now,
     };
 
     setSaving(true);

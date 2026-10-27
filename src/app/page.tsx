@@ -389,7 +389,8 @@ export default function TossProfilePage() {
                   </div>
                 ) : (
                   links
-                    .sort((a, b) => a.order - b.order)
+                    .slice()
+                    .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
                     .map((link) => (
                       <LinkCard key={link.id} link={link} />
                     ))

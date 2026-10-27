@@ -32,6 +32,7 @@ export interface LinkItem {
   badgeText?: string;
   isActive: boolean;
   order: number;
+  createdAt?: number;
 }
 
 export const PROFILE_DATA = {

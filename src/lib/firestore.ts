@@ -35,10 +35,10 @@ export async function addLink(link: LinkItem): Promise<string> {
 }
 
 /**
- * Firestore에서 링크 목록을 order 오름차순으로 불러옵니다.
+ * Firestore에서 링크 목록을 createdAt 내림차순으로 불러옵니다.
  */
 export async function fetchLinks(): Promise<LinkItem[]> {
-  const q = query(linksCol(), orderBy("order", "asc"));
+  const q = query(linksCol(), orderBy("createdAt", "desc"));
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => {
     const data = doc.data();
@@ -52,6 +52,7 @@ export async function fetchLinks(): Promise<LinkItem[]> {
       badgeText: data.badgeText ?? undefined,
       isActive: data.isActive,
       order: data.order,
+      createdAt: data.createdAt ?? undefined,
     } as LinkItem;
   });
 }
