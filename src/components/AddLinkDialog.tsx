@@ -15,6 +15,7 @@ import { LinkItem } from "@/data/profile";
 import { addLink } from "@/lib/firestore";
 
 interface AddLinkDialogProps {
+  userId: string;
   onAdd: (link: LinkItem) => void;
 }
 
@@ -49,7 +50,7 @@ const DEFAULT_FORM = {
   badgeText: "",
 };
 
-export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
+export function AddLinkDialog({ userId, onAdd }: AddLinkDialogProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -90,7 +91,7 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
 
     setSaving(true);
     try {
-      const firestoreId = await addLink(newLink);
+      const firestoreId = await addLink(userId, newLink);
       // Firestore가 발급한 ID로 교체하여 상위에 전달
       onAdd({ ...newLink, id: firestoreId });
       setForm(DEFAULT_FORM);

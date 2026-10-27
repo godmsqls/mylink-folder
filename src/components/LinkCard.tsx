@@ -113,11 +113,12 @@ function DeleteModal({ title, onConfirm, onCancel, deleting }: DeleteModalProps)
 // ────────────────────────────────────────────────────────────
 interface InlineEditFormProps {
   link: LinkItem;
+  userId?: string;
   onSave: (updated: LinkItem) => void;
   onCancel: () => void;
 }
 
-function InlineEditForm({ link, onSave, onCancel }: InlineEditFormProps) {
+function InlineEditForm({ link, userId, onSave, onCancel }: InlineEditFormProps) {
   const [form, setForm] = useState({
     type: link.type,
     title: link.title,
@@ -160,7 +161,9 @@ function InlineEditForm({ link, onSave, onCancel }: InlineEditFormProps) {
 
     setSaving(true);
     try {
-      await updateLink(link.id, updated);
+      if (userId) {
+        await updateLink(userId, link.id, updated);
+      }
       onSave(updated);
     } catch (err) {
       console.error("링크 수정 실패:", err);
@@ -339,11 +342,12 @@ function InlineEditForm({ link, onSave, onCancel }: InlineEditFormProps) {
 // ────────────────────────────────────────────────────────────
 interface LinkCardProps {
   link: LinkItem;
+  userId?: string;
   onUpdate?: (updated: LinkItem) => void;
   onDelete?: (id: string) => void;
 }
 
-export function LinkCard({ link, onUpdate, onDelete }: LinkCardProps) {
+export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -360,7 +364,9 @@ export function LinkCard({ link, onUpdate, onDelete }: LinkCardProps) {
   const handleDeleteConfirm = async () => {
     setDeleting(true);
     try {
-      await deleteLink(link.id);
+      if (userId) {
+        await deleteLink(userId, link.id);
+      }
       setShowDeleteModal(false);
       onDelete?.(link.id);
     } catch (err) {
@@ -407,6 +413,7 @@ export function LinkCard({ link, onUpdate, onDelete }: LinkCardProps) {
       <>
         <InlineEditForm
           link={link}
+          userId={userId}
           onSave={handleSave}
           onCancel={() => setIsEditing(false)}
         />

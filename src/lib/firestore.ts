@@ -14,16 +14,16 @@ import { LinkItem } from "@/data/profile";
 
 const db = getFirestore(app);
 
-/** users/anonymous/links 컬렉션 참조 */
-const linksCol = () =>
-  collection(db, "users", "anonymous", "links");
+/** users/{userId}/links 컬렉션 참조 */
+const linksCol = (userId: string) =>
+  collection(db, "users", userId, "links");
 
 /**
- * 링크를 Firestore에 추가합니다.
+ * 사용자의 Firestore 경로(users/{userId}/links)에 링크를 추가합니다.
  * @returns Firestore가 발급한 document ID
  */
-export async function addLink(link: LinkItem): Promise<string> {
-  const docRef = await addDoc(linksCol(), {
+export async function addLink(userId: string, link: LinkItem): Promise<string> {
+  const docRef = await addDoc(linksCol(userId), {
     type: link.type,
     title: link.title,
     subtitle: link.subtitle ?? null,
@@ -38,10 +38,14 @@ export async function addLink(link: LinkItem): Promise<string> {
 }
 
 /**
- * Firestore의 링크 문서를 수정합니다.
+ * Firestore의 users/{userId}/links/{id} 문서를 수정합니다.
  */
-export async function updateLink(id: string, link: Partial<LinkItem>): Promise<void> {
-  const docRef = doc(db, "users", "anonymous", "links", id);
+export async function updateLink(
+  userId: string,
+  id: string,
+  link: Partial<LinkItem>
+): Promise<void> {
+  const docRef = doc(db, "users", userId, "links", id);
   await updateDoc(docRef, {
     type: link.type,
     title: link.title,
@@ -55,18 +59,18 @@ export async function updateLink(id: string, link: Partial<LinkItem>): Promise<v
 }
 
 /**
- * Firestore에서 링크 문서를 삭제합니다.
+ * Firestore의 users/{userId}/links/{id} 문서를 삭제합니다.
  */
-export async function deleteLink(id: string): Promise<void> {
-  const docRef = doc(db, "users", "anonymous", "links", id);
+export async function deleteLink(userId: string, id: string): Promise<void> {
+  const docRef = doc(db, "users", userId, "links", id);
   await deleteDoc(docRef);
 }
 
 /**
- * Firestore에서 링크 목록을 createdAt 내림차순으로 불러옵니다.
+ * Firestore의 users/{userId}/links 컬렉션에서 링크 목록을 createdAt 내림차순으로 불러옵니다.
  */
-export async function fetchLinks(): Promise<LinkItem[]> {
-  const q = query(linksCol(), orderBy("createdAt", "desc"));
+export async function fetchLinks(userId: string): Promise<LinkItem[]> {
+  const q = query(linksCol(userId), orderBy("createdAt", "desc"));
   const snapshot = await getDocs(q);
   return snapshot.docs.map((doc) => {
     const data = doc.data();
