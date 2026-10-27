@@ -5,6 +5,9 @@ import {
   getDocs,
   query,
   orderBy,
+  doc,
+  updateDoc,
+  deleteDoc,
 } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 import { LinkItem } from "@/data/profile";
@@ -32,6 +35,31 @@ export async function addLink(link: LinkItem): Promise<string> {
     createdAt: Date.now(),
   });
   return docRef.id;
+}
+
+/**
+ * Firestore의 링크 문서를 수정합니다.
+ */
+export async function updateLink(id: string, link: Partial<LinkItem>): Promise<void> {
+  const docRef = doc(db, "users", "anonymous", "links", id);
+  await updateDoc(docRef, {
+    type: link.type,
+    title: link.title,
+    subtitle: link.subtitle ?? null,
+    url: link.url ?? null,
+    iconName: link.iconName ?? null,
+    badgeText: link.badgeText ?? null,
+    isActive: link.isActive,
+    order: link.order,
+  });
+}
+
+/**
+ * Firestore에서 링크 문서를 삭제합니다.
+ */
+export async function deleteLink(id: string): Promise<void> {
+  const docRef = doc(db, "users", "anonymous", "links", id);
+  await deleteDoc(docRef);
 }
 
 /**

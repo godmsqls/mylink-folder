@@ -47,7 +47,19 @@ export default function TossProfilePage() {
 
   const handleAddLink = (newLink: LinkItem) => {
     setLinks((prev) => [...prev, newLink]);
-    showToast("링크를 추가했어요 ✅");
+    showToast("링크를 추가했어요");
+  };
+
+  const handleUpdateLink = (updatedLink: LinkItem) => {
+    setLinks((prev) =>
+      prev.map((item) => (item.id === updatedLink.id ? updatedLink : item))
+    );
+    showToast("링크를 수정했어요");
+  };
+
+  const handleDeleteLink = (id: string) => {
+    setLinks((prev) => prev.filter((item) => item.id !== id));
+    showToast("링크를 삭제했어요");
   };
 
   const showToast = (message: string) => {
@@ -392,7 +404,12 @@ export default function TossProfilePage() {
                     .slice()
                     .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
                     .map((link) => (
-                      <LinkCard key={link.id} link={link} />
+                      <LinkCard
+                        key={link.id}
+                        link={link}
+                        onUpdate={handleUpdateLink}
+                        onDelete={handleDeleteLink}
+                      />
                     ))
                 )}
                 <AddLinkDialog onAdd={handleAddLink} />
