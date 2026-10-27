@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Image from "next/image";
 import {
   Mail,
@@ -18,11 +18,32 @@ import { GithubIcon, LinkedinIcon, InstagramIcon } from "@/components/SocialIcon
 import { PROFILE_DATA, LinkItem } from "@/data/profile";
 import { LinkCard } from "@/components/LinkCard";
 import { AddLinkDialog } from "@/components/AddLinkDialog";
+import { fetchLinks } from "@/lib/firestore";
 
 export default function TossProfilePage() {
   const [activeTab, setActiveTab] = useState<"projects" | "skills" | "links">("projects");
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [links, setLinks] = useState<LinkItem[]>(PROFILE_DATA.links);
+  const [linksLoading, setLinksLoading] = useState(false);
+
+  // Firestore에서 링크 목록을 불러옴 (링크 탭 첫 진입 시 1회)
+  const [linksFetched, setLinksFetched] = useState(false);
+
+  useEffect(() => {
+    if (activeTab !== "links" || linksFetched) return;
+    setLinksLoading(true);
+    fetchLinks()
+      .then((firestoreLinks) => {
+        if (firestoreLinks.length > 0) {
+          setLinks(firestoreLinks);
+        }
+      })
+      .catch((err) => console.error("링크 불러오기 실패:", err))
+      .finally(() => {
+        setLinksLoading(false);
+        setLinksFetched(true);
+      });
+  }, [activeTab, linksFetched]);
 
   const handleAddLink = (newLink: LinkItem) => {
     setLinks((prev) => [...prev, newLink]);
@@ -362,11 +383,17 @@ export default function TossProfilePage() {
               </div>
 
               <div className="flex flex-col mt-2 px-1 pb-1">
-                {links
-                  .sort((a, b) => a.order - b.order)
-                  .map((link) => (
-                    <LinkCard key={link.id} link={link} />
-                  ))}
+                {linksLoading ? (
+                  <div className="flex items-center justify-center py-8 text-[13px] text-[#8b95a1]">
+                    링크를 불러오는 중…
+                  </div>
+                ) : (
+                  links
+                    .sort((a, b) => a.order - b.order)
+                    .map((link) => (
+                      <LinkCard key={link.id} link={link} />
+                    ))
+                )}
                 <AddLinkDialog onAdd={handleAddLink} />
               </div>
 

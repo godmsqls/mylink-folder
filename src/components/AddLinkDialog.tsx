@@ -12,6 +12,7 @@ import {
   DialogClose,
 } from "@/components/ui/dialog";
 import { LinkItem } from "@/data/profile";
+import { addLink } from "@/lib/firestore";
 
 interface AddLinkDialogProps {
   onAdd: (link: LinkItem) => void;
@@ -52,6 +53,7 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState(DEFAULT_FORM);
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
 
   const validate = () => {
     const next: Record<string, string> = {};
@@ -68,7 +70,7 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
     return Object.keys(next).length === 0;
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate()) return;
 
@@ -84,10 +86,20 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
       order: Date.now(),
     };
 
-    onAdd(newLink);
-    setForm(DEFAULT_FORM);
-    setErrors({});
-    setOpen(false);
+    setSaving(true);
+    try {
+      const firestoreId = await addLink(newLink);
+      // Firestore가 발급한 ID로 교체하여 상위에 전달
+      onAdd({ ...newLink, id: firestoreId });
+      setForm(DEFAULT_FORM);
+      setErrors({});
+      setOpen(false);
+    } catch (err) {
+      console.error("링크 저장 실패:", err);
+      setErrors({ submit: "저장 중 오류가 발생했어요. 다시 시도해 주세요." });
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -258,17 +270,22 @@ export function AddLinkDialog({ onAdd }: AddLinkDialogProps) {
 
           {/* 푸터 버튼 */}
           <DialogFooter className="px-6 py-4 bg-[#f9fafb] border-t border-[#f2f4f6] flex-row gap-2 rounded-b-[20px] -mx-0 -mb-0">
+            {errors.submit && (
+              <p className="w-full text-[12px] text-[#f04452] text-center mb-1">{errors.submit}</p>
+            )}
             <DialogClose
               type="button"
-              className="flex-1 h-11 rounded-[12px] border border-[#e5e8eb] bg-white text-[14px] font-semibold text-[#4e5968] hover:bg-[#f2f4f6] transition-colors cursor-pointer"
+              disabled={saving}
+              className="flex-1 h-11 rounded-[12px] border border-[#e5e8eb] bg-white text-[14px] font-semibold text-[#4e5968] hover:bg-[#f2f4f6] transition-colors cursor-pointer disabled:opacity-50"
             >
               취소
             </DialogClose>
             <button
               type="submit"
-              className="flex-1 h-11 rounded-[12px] bg-[#3182f6] text-white text-[14px] font-bold hover:bg-[#1b64da] active:bg-[#1555bd] transition-colors cursor-pointer"
+              disabled={saving}
+              className="flex-1 h-11 rounded-[12px] bg-[#3182f6] text-white text-[14px] font-bold hover:bg-[#1b64da] active:bg-[#1555bd] transition-colors cursor-pointer disabled:opacity-60"
             >
-              추가하기
+              {saving ? "저장 중…" : "추가하기"}
             </button>
           </DialogFooter>
         </form>
