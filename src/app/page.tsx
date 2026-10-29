@@ -24,18 +24,13 @@ import { PROFILE_DATA, LinkItem } from "@/data/profile";
 import { LinkCard } from "@/components/LinkCard";
 import { AddLinkDialog } from "@/components/AddLinkDialog";
 import { LandingPage } from "@/components/LandingPage";
-import {
-  fetchLinks,
-  ensureUserProfile,
-  saveUserProfile,
-  checkDisplayNameDuplicate,
-  UserProfile,
-} from "@/lib/firestore";
+import { UserProfile } from "@/lib/firestore";
 import { useAuth } from "@/lib/auth-context";
-import { auth } from "@/lib/firebase";
-import { updateProfile } from "firebase/auth";
 import { InlineEditableField } from "@/components/InlineEditableField";
 import { AvatarEditable } from "@/components/AvatarEditable";
+import { useQueryClient } from "@tanstack/react-query";
+import { useLinkquery, useLinkMutations } from "@/hooks/useLinks";
+import { useProfileQuery, useProfileMutation } from "@/hooks/useProfile";
 
 interface ToastState {
   message: string;
@@ -44,54 +39,40 @@ interface ToastState {
 
 export default function TossProfilePage() {
   const { user, loading: authLoading, signInWithGoogle, signOut } = useAuth();
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<"projects" | "skills" | "links">("projects");
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [links, setLinks] = useState<LinkItem[]>([]);
-  const [linksLoading, setLinksLoading] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
 
-  // Firestore 기반 사용자 프로필 상태
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [profileLoading, setProfileLoading] = useState(false);
+  // ────────────────────────────────────────────────────────────
+  // TanStack Query 기반 데이터 관리 (실시간 리스너 배제, 훅 기반 간결화)
+  // ────────────────────────────────────────────────────────────
+  const { data: links = [], isLoading: linksLoading } = useLinkquery(user?.uid);
+  const { addLink, updateLink, deleteLink } = useLinkMutations(user?.uid);
 
-  // Firebase Auth 상태(user.uid)에 따라 Firestore에서 프로필 및 링크 불러오기
-  useEffect(() => {
-    if (!user) {
-      setProfile(null);
-      setLinks([]);
-      setLinksLoading(false);
-      return;
-    }
+  const { data: profile, isLoading: profileLoading } = useProfileQuery(user);
 
-    setProfileLoading(true);
-    ensureUserProfile(user.uid, {
-      displayName: user.displayName,
-      email: user.email,
-      photoURL: user.photoURL,
-    })
-      .then((userProfile) => {
-        setProfile(userProfile);
-      })
-      .catch((err) => {
-        console.error("프로필 불러오기 실패:", err);
-      })
-      .finally(() => {
-        setProfileLoading(false);
-      });
-
-    setLinksLoading(true);
-    fetchLinks(user.uid)
-      .then((firestoreLinks) => {
-        setLinks(firestoreLinks);
-      })
-      .catch((err) => {
-        console.error("링크 불러오기 실패:", err);
-      })
-      .finally(() => {
-        setLinksLoading(false);
-      });
-  }, [user]);
+  // TanStack Query 기반 낙관적 프로필 업데이트 뮤테이션 (중복 검사 및 자동 롤백 내장)
+  const { mutate: updateProfile } = useProfileMutation(user, {
+    onSuccess: (_, variables) => {
+      if (variables.displayName !== undefined) {
+        showToast("표시 이름을 저장했어요", "success");
+      } else if (variables.username !== undefined) {
+        showToast("아이디(@username)를 저장했어요", "success");
+      } else if (variables.bio !== undefined) {
+        showToast("소개글(bio)을 저장했어요", "success");
+      } else if (variables.photoURL !== undefined) {
+        showToast("아바타 이미지를 변경했어요", "success");
+      }
+    },
+    onError: (error) => {
+      showToast(
+        error.message || "저장 중 오류가 발생하여 이전 상태로 복원했습니다.",
+        "error"
+      );
+    },
+  });
 
   const showToast = (message: string, type: "success" | "error" = "success") => {
     setToast({ message, type });
@@ -124,155 +105,56 @@ export default function TossProfilePage() {
   };
 
   // ────────────────────────────────────────────────────────────
-  // 프로필 인라인 수정 및 실시간 Firestore 동기화 핸들러
+  // 프로필 인라인 수정 핸들러 (TanStack Query 낙관적 업데이트 트리거)
   // ────────────────────────────────────────────────────────────
-
-  /**
-   * displayName 수정 핸들러:
-   * 1. 로컬 상태 즉시 반영 (Optimistic UI)
-   * 2. 백그라운드에서 Firestore users 컬렉션 중복 검사
-   * 3. 중복 발생 시 에러 메시지 표시 후 이전 값으로 롤백 및 저장 중단
-   * 4. 중복 없으면 Firestore users/{uid} 저장 (실패 시 롤백)
-   */
-  const handleUpdateDisplayName = async (newDisplayName: string) => {
-    if (!profile || !user) return;
+  const handleUpdateDisplayName = (newDisplayName: string) => {
+    if (!profile) return;
     const cleanName = newDisplayName.trim();
     if (!cleanName) {
       showToast("표시 이름(displayName)은 비워둘 수 없습니다.", "error");
       return;
     }
     if (cleanName === profile.displayName) return;
-
-    const prevDisplayName = profile.displayName;
-
-    // 1. UI 반응성을 위해 로컬 상태 먼저 즉각 업데이트
-    setProfile((prev) => (prev ? { ...prev, displayName: cleanName } : prev));
-
-    // 2. 백그라운드에서 Firestore 중복 검증 및 저장 수행
-    try {
-      const isDuplicate = await checkDisplayNameDuplicate(user.uid, cleanName);
-      if (isDuplicate) {
-        // 중복인 경우: 롤백 후 에러 표시 및 저장 중단
-        setProfile((prev) => (prev ? { ...prev, displayName: prevDisplayName } : prev));
-        showToast(`"${cleanName}"은(는) 이미 사용 중인 표시 이름입니다.`, "error");
-        return;
-      }
-
-      // Firestore 저장
-      await saveUserProfile(user.uid, { displayName: cleanName });
-
-      // Firebase Auth 세션 동기화 (가능한 경우)
-      if (auth.currentUser) {
-        try {
-          await updateProfile(auth.currentUser, { displayName: cleanName });
-        } catch (e) {
-          console.warn("Auth displayName update skipped:", e);
-        }
-      }
-
-      showToast("표시 이름을 저장했어요", "success");
-    } catch (error) {
-      console.error("displayName 저장 오류:", error);
-      // 실패 시 이전 상태로 롤백
-      setProfile((prev) => (prev ? { ...prev, displayName: prevDisplayName } : prev));
-      showToast("저장 중 오류가 발생하여 이전 이름으로 복원했습니다.", "error");
-    }
+    updateProfile({ displayName: cleanName });
   };
 
-  /**
-   * username 수정 핸들러:
-   * 로컬 상태 즉시 반영 + Firestore 백그라운드 저장 (실패 시 롤백)
-   */
-  const handleUpdateUsername = async (newUsername: string) => {
-    if (!profile || !user) return;
+  const handleUpdateUsername = (newUsername: string) => {
+    if (!profile) return;
     const cleanUsername = newUsername.trim().replace(/^@/, "");
     if (!cleanUsername) {
       showToast("username은 비워둘 수 없습니다.", "error");
       return;
     }
     if (cleanUsername === profile.username) return;
-
-    const prevUsername = profile.username;
-    // 로컬 상태 즉각 반영
-    setProfile((prev) => (prev ? { ...prev, username: cleanUsername } : prev));
-
-    try {
-      await saveUserProfile(user.uid, { username: cleanUsername });
-      showToast("아이디(@username)를 저장했어요", "success");
-    } catch (error) {
-      console.error("username 저장 오류:", error);
-      setProfile((prev) => (prev ? { ...prev, username: prevUsername } : prev));
-      showToast("아이디 저장에 실패하여 이전 값으로 복원했습니다.", "error");
-    }
+    updateProfile({ username: cleanUsername });
   };
 
-  /**
-   * bio 수정 핸들러:
-   * 로컬 상태 즉시 반영 + Firestore 백그라운드 저장 (실패 시 롤백)
-   */
-  const handleUpdateBio = async (newBio: string) => {
-    if (!profile || !user) return;
+  const handleUpdateBio = (newBio: string) => {
+    if (!profile) return;
     const cleanBio = newBio.trim();
     if (cleanBio === profile.bio) return;
-
-    const prevBio = profile.bio;
-    // 로컬 상태 즉각 반영
-    setProfile((prev) => (prev ? { ...prev, bio: cleanBio } : prev));
-
-    try {
-      await saveUserProfile(user.uid, { bio: cleanBio });
-      showToast("소개글(bio)을 저장했어요", "success");
-    } catch (error) {
-      console.error("bio 저장 오류:", error);
-      setProfile((prev) => (prev ? { ...prev, bio: prevBio } : prev));
-      showToast("소개글 저장에 실패하여 이전 내용으로 복원했습니다.", "error");
-    }
+    updateProfile({ bio: cleanBio });
   };
 
-  /**
-   * avatar 수정 핸들러:
-   * 로컬 상태 즉시 반영 + Firestore 백그라운드 저장 (실패 시 롤백)
-   */
-  const handleUpdateAvatar = async (newPhotoURL: string) => {
-    if (!profile || !user) return;
+  const handleUpdateAvatar = (newPhotoURL: string) => {
+    if (!profile) return;
     const cleanUrl = newPhotoURL.trim();
     if (!cleanUrl || cleanUrl === profile.photoURL) return;
-
-    const prevPhotoURL = profile.photoURL;
-    // 로컬 상태 즉각 반영
-    setProfile((prev) => (prev ? { ...prev, photoURL: cleanUrl } : prev));
-
-    try {
-      await saveUserProfile(user.uid, { photoURL: cleanUrl });
-      if (auth.currentUser) {
-        try {
-          await updateProfile(auth.currentUser, { photoURL: cleanUrl });
-        } catch (e) {
-          console.warn("Auth photoURL update skipped:", e);
-        }
-      }
-      showToast("아바타 이미지를 변경했어요", "success");
-    } catch (error) {
-      console.error("avatar 저장 오류:", error);
-      setProfile((prev) => (prev ? { ...prev, photoURL: prevPhotoURL } : prev));
-      showToast("이미지 변경에 실패하여 이전 이미지로 복원했습니다.", "error");
-    }
+    updateProfile({ photoURL: cleanUrl });
   };
 
-  const handleAddLink = (newLink: LinkItem) => {
-    setLinks((prev) => [newLink, ...prev]);
+  const handleAddLink = (_newLink: LinkItem) => {
+    queryClient.invalidateQueries({ queryKey: ["links", user?.uid] });
     showToast("링크를 추가했어요", "success");
   };
 
-  const handleUpdateLink = (updatedLink: LinkItem) => {
-    setLinks((prev) =>
-      prev.map((item) => (item.id === updatedLink.id ? updatedLink : item))
-    );
+  const handleUpdateLink = (_updatedLink: LinkItem) => {
+    queryClient.invalidateQueries({ queryKey: ["links", user?.uid] });
     showToast("링크를 수정했어요", "success");
   };
 
-  const handleDeleteLink = (id: string) => {
-    setLinks((prev) => prev.filter((item) => item.id !== id));
+  const handleDeleteLink = (_id: string) => {
+    queryClient.invalidateQueries({ queryKey: ["links", user?.uid] });
     showToast("링크를 삭제했어요", "success");
   };
 
