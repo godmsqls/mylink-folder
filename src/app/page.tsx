@@ -12,6 +12,8 @@ import {
   Code2,
   Sparkles,
   ArrowUpRight,
+  AlertCircle,
+  User as UserIcon,
 } from "lucide-react";
 import {
   GithubIcon,
@@ -22,25 +24,61 @@ import { PROFILE_DATA, LinkItem } from "@/data/profile";
 import { LinkCard } from "@/components/LinkCard";
 import { AddLinkDialog } from "@/components/AddLinkDialog";
 import { LandingPage } from "@/components/LandingPage";
-import { fetchLinks } from "@/lib/firestore";
+import {
+  fetchLinks,
+  ensureUserProfile,
+  saveUserProfile,
+  checkDisplayNameDuplicate,
+  UserProfile,
+} from "@/lib/firestore";
 import { useAuth } from "@/lib/auth-context";
+import { auth } from "@/lib/firebase";
+import { updateProfile } from "firebase/auth";
+import { InlineEditableField } from "@/components/InlineEditableField";
+import { AvatarEditable } from "@/components/AvatarEditable";
+
+interface ToastState {
+  message: string;
+  type: "success" | "error";
+}
 
 export default function TossProfilePage() {
   const { user, loading: authLoading, signInWithGoogle, signOut } = useAuth();
 
   const [activeTab, setActiveTab] = useState<"projects" | "skills" | "links">("projects");
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<ToastState | null>(null);
   const [links, setLinks] = useState<LinkItem[]>([]);
   const [linksLoading, setLinksLoading] = useState(false);
   const [isSigningIn, setIsSigningIn] = useState(false);
 
-  // Firebase Auth 상태(user.uid)에 따라 Firestore의 users/{user.uid}/links 경로에서 링크 불러오기
+  // Firestore 기반 사용자 프로필 상태
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  // Firebase Auth 상태(user.uid)에 따라 Firestore에서 프로필 및 링크 불러오기
   useEffect(() => {
     if (!user) {
+      setProfile(null);
       setLinks([]);
       setLinksLoading(false);
       return;
     }
+
+    setProfileLoading(true);
+    ensureUserProfile(user.uid, {
+      displayName: user.displayName,
+      email: user.email,
+      photoURL: user.photoURL,
+    })
+      .then((userProfile) => {
+        setProfile(userProfile);
+      })
+      .catch((err) => {
+        console.error("프로필 불러오기 실패:", err);
+      })
+      .finally(() => {
+        setProfileLoading(false);
+      });
 
     setLinksLoading(true);
     fetchLinks(user.uid)
@@ -55,15 +93,22 @@ export default function TossProfilePage() {
       });
   }, [user]);
 
+  const showToast = (message: string, type: "success" | "error" = "success") => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 2800);
+  };
+
   const handleSignIn = async () => {
     setIsSigningIn(true);
     try {
       const loggedUser = await signInWithGoogle();
       if (loggedUser) {
-        showToast(`${loggedUser.displayName || "사용자"}님, 환영합니다! 🎉`);
+        showToast(`${loggedUser.displayName || "사용자"}님, 환영합니다! 🎉`, "success");
       }
     } catch {
-      showToast("로그인 중 오류가 발생했어요. 다시 시도해 주세요.");
+      showToast("로그인 중 오류가 발생했어요. 다시 시도해 주세요.", "error");
     } finally {
       setIsSigningIn(false);
     }
@@ -72,46 +117,175 @@ export default function TossProfilePage() {
   const handleSignOut = async () => {
     try {
       await signOut();
-      showToast("로그아웃되었습니다.");
+      showToast("로그아웃되었습니다.", "success");
     } catch {
-      showToast("로그아웃 중 오류가 발생했어요.");
+      showToast("로그아웃 중 오류가 발생했어요.", "error");
+    }
+  };
+
+  // ────────────────────────────────────────────────────────────
+  // 프로필 인라인 수정 및 실시간 Firestore 동기화 핸들러
+  // ────────────────────────────────────────────────────────────
+
+  /**
+   * displayName 수정 핸들러:
+   * 1. 로컬 상태 즉시 반영 (Optimistic UI)
+   * 2. 백그라운드에서 Firestore users 컬렉션 중복 검사
+   * 3. 중복 발생 시 에러 메시지 표시 후 이전 값으로 롤백 및 저장 중단
+   * 4. 중복 없으면 Firestore users/{uid} 저장 (실패 시 롤백)
+   */
+  const handleUpdateDisplayName = async (newDisplayName: string) => {
+    if (!profile || !user) return;
+    const cleanName = newDisplayName.trim();
+    if (!cleanName) {
+      showToast("표시 이름(displayName)은 비워둘 수 없습니다.", "error");
+      return;
+    }
+    if (cleanName === profile.displayName) return;
+
+    const prevDisplayName = profile.displayName;
+
+    // 1. UI 반응성을 위해 로컬 상태 먼저 즉각 업데이트
+    setProfile((prev) => (prev ? { ...prev, displayName: cleanName } : prev));
+
+    // 2. 백그라운드에서 Firestore 중복 검증 및 저장 수행
+    try {
+      const isDuplicate = await checkDisplayNameDuplicate(user.uid, cleanName);
+      if (isDuplicate) {
+        // 중복인 경우: 롤백 후 에러 표시 및 저장 중단
+        setProfile((prev) => (prev ? { ...prev, displayName: prevDisplayName } : prev));
+        showToast(`"${cleanName}"은(는) 이미 사용 중인 표시 이름입니다.`, "error");
+        return;
+      }
+
+      // Firestore 저장
+      await saveUserProfile(user.uid, { displayName: cleanName });
+
+      // Firebase Auth 세션 동기화 (가능한 경우)
+      if (auth.currentUser) {
+        try {
+          await updateProfile(auth.currentUser, { displayName: cleanName });
+        } catch (e) {
+          console.warn("Auth displayName update skipped:", e);
+        }
+      }
+
+      showToast("표시 이름을 저장했어요", "success");
+    } catch (error) {
+      console.error("displayName 저장 오류:", error);
+      // 실패 시 이전 상태로 롤백
+      setProfile((prev) => (prev ? { ...prev, displayName: prevDisplayName } : prev));
+      showToast("저장 중 오류가 발생하여 이전 이름으로 복원했습니다.", "error");
+    }
+  };
+
+  /**
+   * username 수정 핸들러:
+   * 로컬 상태 즉시 반영 + Firestore 백그라운드 저장 (실패 시 롤백)
+   */
+  const handleUpdateUsername = async (newUsername: string) => {
+    if (!profile || !user) return;
+    const cleanUsername = newUsername.trim().replace(/^@/, "");
+    if (!cleanUsername) {
+      showToast("username은 비워둘 수 없습니다.", "error");
+      return;
+    }
+    if (cleanUsername === profile.username) return;
+
+    const prevUsername = profile.username;
+    // 로컬 상태 즉각 반영
+    setProfile((prev) => (prev ? { ...prev, username: cleanUsername } : prev));
+
+    try {
+      await saveUserProfile(user.uid, { username: cleanUsername });
+      showToast("아이디(@username)를 저장했어요", "success");
+    } catch (error) {
+      console.error("username 저장 오류:", error);
+      setProfile((prev) => (prev ? { ...prev, username: prevUsername } : prev));
+      showToast("아이디 저장에 실패하여 이전 값으로 복원했습니다.", "error");
+    }
+  };
+
+  /**
+   * bio 수정 핸들러:
+   * 로컬 상태 즉시 반영 + Firestore 백그라운드 저장 (실패 시 롤백)
+   */
+  const handleUpdateBio = async (newBio: string) => {
+    if (!profile || !user) return;
+    const cleanBio = newBio.trim();
+    if (cleanBio === profile.bio) return;
+
+    const prevBio = profile.bio;
+    // 로컬 상태 즉각 반영
+    setProfile((prev) => (prev ? { ...prev, bio: cleanBio } : prev));
+
+    try {
+      await saveUserProfile(user.uid, { bio: cleanBio });
+      showToast("소개글(bio)을 저장했어요", "success");
+    } catch (error) {
+      console.error("bio 저장 오류:", error);
+      setProfile((prev) => (prev ? { ...prev, bio: prevBio } : prev));
+      showToast("소개글 저장에 실패하여 이전 내용으로 복원했습니다.", "error");
+    }
+  };
+
+  /**
+   * avatar 수정 핸들러:
+   * 로컬 상태 즉시 반영 + Firestore 백그라운드 저장 (실패 시 롤백)
+   */
+  const handleUpdateAvatar = async (newPhotoURL: string) => {
+    if (!profile || !user) return;
+    const cleanUrl = newPhotoURL.trim();
+    if (!cleanUrl || cleanUrl === profile.photoURL) return;
+
+    const prevPhotoURL = profile.photoURL;
+    // 로컬 상태 즉각 반영
+    setProfile((prev) => (prev ? { ...prev, photoURL: cleanUrl } : prev));
+
+    try {
+      await saveUserProfile(user.uid, { photoURL: cleanUrl });
+      if (auth.currentUser) {
+        try {
+          await updateProfile(auth.currentUser, { photoURL: cleanUrl });
+        } catch (e) {
+          console.warn("Auth photoURL update skipped:", e);
+        }
+      }
+      showToast("아바타 이미지를 변경했어요", "success");
+    } catch (error) {
+      console.error("avatar 저장 오류:", error);
+      setProfile((prev) => (prev ? { ...prev, photoURL: prevPhotoURL } : prev));
+      showToast("이미지 변경에 실패하여 이전 이미지로 복원했습니다.", "error");
     }
   };
 
   const handleAddLink = (newLink: LinkItem) => {
     setLinks((prev) => [newLink, ...prev]);
-    showToast("링크를 추가했어요");
+    showToast("링크를 추가했어요", "success");
   };
 
   const handleUpdateLink = (updatedLink: LinkItem) => {
     setLinks((prev) =>
       prev.map((item) => (item.id === updatedLink.id ? updatedLink : item))
     );
-    showToast("링크를 수정했어요");
+    showToast("링크를 수정했어요", "success");
   };
 
   const handleDeleteLink = (id: string) => {
     setLinks((prev) => prev.filter((item) => item.id !== id));
-    showToast("링크를 삭제했어요");
-  };
-
-  const showToast = (message: string) => {
-    setToastMessage(message);
-    setTimeout(() => {
-      setToastMessage(null);
-    }, 2400);
+    showToast("링크를 삭제했어요", "success");
   };
 
   const handleCopyEmail = () => {
-    const emailToCopy = user?.email || PROFILE_DATA.email;
+    const emailToCopy = profile?.email || user?.email || PROFILE_DATA.email;
     navigator.clipboard.writeText(emailToCopy);
-    showToast("이메일 주소를 복사했어요");
+    showToast("이메일 주소를 복사했어요", "success");
   };
 
   const handleShareProfile = () => {
     if (typeof window !== "undefined") {
       navigator.clipboard.writeText(window.location.href);
-      showToast("프로필 링크를 복사했어요");
+      showToast("프로필 링크를 복사했어요", "success");
     }
   };
 
@@ -136,12 +310,24 @@ export default function TossProfilePage() {
   if (!user) {
     return (
       <>
-        {toastMessage && (
-          <div className="fixed bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 rounded-[14px] bg-[#191f28] text-white text-[14px] font-medium shadow-tds-toast animate-tds-fade whitespace-nowrap">
-            <div className="w-5 h-5 rounded-full bg-[#04c759] flex items-center justify-center flex-shrink-0">
-              <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
+        {toast && (
+          <div
+            className={`fixed bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 rounded-[14px] text-white text-[14px] font-medium shadow-tds-toast animate-tds-fade whitespace-nowrap ${
+              toast.type === "error" ? "bg-[#e53935]" : "bg-[#191f28]"
+            }`}
+          >
+            <div
+              className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+                toast.type === "error" ? "bg-white/20" : "bg-[#04c759]"
+              }`}
+            >
+              {toast.type === "error" ? (
+                <AlertCircle className="w-3.5 h-3.5 stroke-[2.5] text-white" />
+              ) : (
+                <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
+              )}
             </div>
-            <span>{toastMessage}</span>
+            <span>{toast.message}</span>
           </div>
         )}
         <LandingPage onSignIn={handleSignIn} isSigningIn={isSigningIn} />
@@ -152,20 +338,37 @@ export default function TossProfilePage() {
   // ────────────────────────────────────────────────────────────
   // 2. 로그인 상태: 사용자 개인 맞춤 페이지
   // ────────────────────────────────────────────────────────────
-  const displayName = user.displayName || PROFILE_DATA.name;
-  const displayEmail = user.email || PROFILE_DATA.email;
-  const displayAvatar = user.photoURL || PROFILE_DATA.avatarImage;
+  const currentDisplayName =
+    profile?.displayName || user.displayName || PROFILE_DATA.name;
+  const currentUsername =
+    profile?.username || (user.email ? user.email.split("@")[0] : "user");
+  const currentBio = profile?.bio ?? PROFILE_DATA.bio;
+  const currentAvatar =
+    profile?.photoURL || user.photoURL || PROFILE_DATA.avatarImage;
+  const currentEmail = profile?.email || user.email || PROFILE_DATA.email;
 
   return (
     <div className="min-h-screen bg-[#f2f4f6] text-[#191f28]">
       
-      {/* 토스트 알림창 (TDS Toast) */}
-      {toastMessage && (
-        <div className="fixed bottom-24 lg:bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 rounded-[14px] bg-[#191f28] text-white text-[14px] font-medium shadow-tds-toast animate-tds-fade whitespace-nowrap">
-          <div className="w-5 h-5 rounded-full bg-[#04c759] flex items-center justify-center flex-shrink-0">
-            <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
+      {/* 토스트 알림창 (TDS Toast) - 성공/실패 시각적 구분 */}
+      {toast && (
+        <div
+          className={`fixed bottom-24 lg:bottom-10 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 rounded-[14px] text-white text-[14px] font-medium shadow-tds-toast animate-tds-fade whitespace-nowrap ${
+            toast.type === "error" ? "bg-[#e53935]" : "bg-[#191f28]"
+          }`}
+        >
+          <div
+            className={`w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0 ${
+              toast.type === "error" ? "bg-white/20" : "bg-[#04c759]"
+            }`}
+          >
+            {toast.type === "error" ? (
+              <AlertCircle className="w-3.5 h-3.5 stroke-[2.5] text-white" />
+            ) : (
+              <Check className="w-3.5 h-3.5 stroke-[3] text-white" />
+            )}
           </div>
-          <span>{toastMessage}</span>
+          <span>{toast.message}</span>
         </div>
       )}
 
@@ -177,31 +380,31 @@ export default function TossProfilePage() {
           {/* 좌측: 로고 및 사용자 이름 */}
           <div className="flex items-center gap-2 shrink-0">
             <div className="w-6 h-6 rounded-full bg-[#3182f6] flex items-center justify-center text-white text-[13px] font-bold">
-              {displayName[0] || "M"}
+              {currentDisplayName[0] || "M"}
             </div>
             <span className="text-[16px] sm:text-[17px] font-bold text-[#191f28]">
-              {displayName}
+              {currentDisplayName}
             </span>
           </div>
 
-          {/* 우측: 로그인 사용자 상태 ("홍길동님" + "로그아웃") 및 프로필 공유 버튼 */}
+          {/* 우측: 로그인 사용자 상태 및 프로필 공유 버튼 */}
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1.5 sm:gap-2">
               <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] bg-white border border-[#e5e8eb] shadow-2xs">
-                {user.photoURL ? (
+                {currentAvatar ? (
                   <img
-                    src={user.photoURL}
-                    alt={displayName}
+                    src={currentAvatar}
+                    alt={currentDisplayName}
                     referrerPolicy="no-referrer"
                     className="w-4.5 h-4.5 rounded-full object-cover shrink-0"
                   />
                 ) : (
                   <div className="w-4.5 h-4.5 rounded-full bg-[#3182f6] text-white text-[10px] font-bold flex items-center justify-center shrink-0">
-                    {displayName[0] || "유"}
+                    {currentDisplayName[0] || "유"}
                   </div>
                 )}
                 <span className="text-[12px] sm:text-[13px] font-semibold text-[#191f28] max-w-[80px] sm:max-w-[120px] truncate">
-                  {displayName}님
+                  {currentDisplayName}님
                 </span>
               </div>
               <button
@@ -225,44 +428,58 @@ export default function TossProfilePage() {
         {/* 메인 콘텐츠 그리드 (모바일: Stack / 데스크톱: 2-Columns Grid) */}
         <main className="w-full max-w-[480px] lg:max-w-[1024px] mx-auto flex flex-col lg:flex-row lg:items-start lg:gap-8 lg:px-8 pt-0 lg:pt-6 pb-32 lg:pb-12">
           
-          {/* [좌측 패널] 개인 프로필 히어로 카드 */}
+          {/* [좌측 패널] 개인 프로필 히어로 카드 (아바타, username, displayname, bio 인라인 편집) */}
           <div className="w-full lg:w-[360px] lg:shrink-0 lg:sticky lg:top-[88px] z-10 flex flex-col">
             <section className="mx-4 lg:mx-0 mt-3 lg:mt-0 mb-3 lg:mb-0 p-6 bg-white rounded-[24px] shadow-tds-1 border border-[#e5e8eb]/50">
-              <div className="flex items-center gap-4 mb-4">
-                {/* 64px 라운드 아바타 */}
-                <div className="relative w-16 h-16 rounded-[20px] overflow-hidden bg-[#f2f4f6] flex-shrink-0 border border-[#e5e8eb]">
-                  {user.photoURL ? (
-                    <img
-                      src={user.photoURL}
-                      alt={displayName}
-                      referrerPolicy="no-referrer"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Image
-                      src={displayAvatar}
-                      alt={displayName}
-                      fill
-                      priority
-                      className="object-cover"
-                      sizes="64px"
-                    />
-                  )}
-                </div>
+              
+              {/* 프로필 헤더: 아바타 + displayName + username + 이메일 */}
+              <div className="flex items-start gap-4 mb-3">
+                {/* 1. 아바타 (64px 라운드 스퀘어, 호버 시 수정 오버레이 및 인라인 팝오버) */}
+                <AvatarEditable
+                  photoURL={currentAvatar}
+                  displayName={currentDisplayName}
+                  onSave={handleUpdateAvatar}
+                  disabled={profileLoading}
+                />
 
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <h1 className="text-[20px] sm:text-[22px] font-bold text-[#191f28] tracking-tight truncate">
-                      {displayName}
-                    </h1>
+                <div className="min-w-0 flex-1">
+                  {/* 2. displayName (인라인 편집 UI: 클릭 시 Input 전환, Enter/Blur 시 중복검사 후 저장, ESC 시 취소) */}
+                  <div className="flex items-center">
+                    <InlineEditableField
+                      value={currentDisplayName}
+                      onSave={handleUpdateDisplayName}
+                      placeholder="이름을 입력해 주세요"
+                      className="text-[20px] sm:text-[22px] font-bold text-[#191f28] tracking-tight leading-tight"
+                      inputClassName="text-[18px] sm:text-[20px] font-bold text-[#191f28] py-0.5"
+                      ariaLabel="표시 이름 (displayName) 수정"
+                      disabled={profileLoading}
+                    />
                   </div>
-                  <p className="text-[13px] font-medium text-[#4e5968] mt-0.5 truncate">
-                    {PROFILE_DATA.role}
-                  </p>
-                  <p className="text-[11px] text-[#8b95a1] truncate">
-                    {displayEmail}
+
+                  {/* 3. username (인라인 편집 UI: @아이디) */}
+                  <div className="mt-0.5 flex items-center">
+                    <InlineEditableField
+                      value={currentUsername}
+                      prefix="@"
+                      onSave={handleUpdateUsername}
+                      placeholder="username"
+                      className="text-[13px] font-semibold text-[#3182f6] hover:text-[#1b64da]"
+                      inputClassName="text-[13px] font-semibold text-[#191f28] py-0.5"
+                      ariaLabel="사용자 아이디 (username) 수정"
+                      disabled={profileLoading}
+                    />
+                  </div>
+
+                  <p className="text-[11px] text-[#8b95a1] truncate mt-1">
+                    {currentEmail}
                   </p>
                 </div>
+              </div>
+
+              {/* 인라인 편집 안내 팁 */}
+              <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-[10px] bg-[#f2f4f6] text-[#6b7684] text-[11px] font-medium mb-3">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#3182f6] shrink-0" />
+                <span className="truncate">이름, 아이디, 소개글을 클릭하여 바로 수정할 수 있어요</span>
               </div>
 
               {/* 활동 상태 뱃지 (TDS Brand-Weak Pill) */}
@@ -271,10 +488,19 @@ export default function TossProfilePage() {
                 <span>새로운 기회와 프로젝트를 기다리고 있어요</span>
               </div>
 
-              {/* 소개글 */}
-              <p className="text-[14px] text-[#333d4b] leading-[1.5] break-keep mb-5">
-                문제를 코드로 깔끔하게 해결하고 직관적인 사용자 경험을 만들어요. 최신 웹 기술과 AI Vibe Coding으로 빠르고 완성도 높은 프로덕트를 개발하고 있어요.
-              </p>
+              {/* 4. 소개글 bio (인라인 편집 UI: 클릭 시 textarea 전환, Enter/Blur 시 저장, ESC 시 취소) */}
+              <div className="mb-5">
+                <InlineEditableField
+                  value={currentBio}
+                  onSave={handleUpdateBio}
+                  placeholder="자신을 소개하는 한 줄 소개글을 작성해 보세요."
+                  isTextarea={true}
+                  className="text-[14px] text-[#333d4b] leading-[1.5] break-keep w-full block"
+                  inputClassName="text-[14px] text-[#333d4b] leading-[1.5]"
+                  ariaLabel="소개글 (bio) 수정"
+                  disabled={profileLoading}
+                />
+              </div>
 
               {/* 스탯 요약 박스 (3-Columns) */}
               <div className="grid grid-cols-3 gap-2 p-3 bg-[#f9fafb] rounded-[16px] border border-[#e5e8eb]/60 text-center">
@@ -314,7 +540,7 @@ export default function TossProfilePage() {
                   <span>이메일 복사</span>
                 </button>
                 <a
-                  href={`mailto:${displayEmail}`}
+                  href={`mailto:${currentEmail}`}
                   className="h-10 px-3 rounded-[12px] btn-tds-secondary text-[13px] font-semibold flex items-center justify-center gap-1.5 cursor-pointer text-center"
                 >
                   <Mail className="w-3.5 h-3.5 text-[#6b7684]" />
@@ -381,7 +607,7 @@ export default function TossProfilePage() {
                         </span>
                       </div>
                       <p className="text-[13px] text-[#8b95a1] mt-0.5">
-                        {displayName}님의 개인 맞춤 링크 목록입니다.
+                        {currentDisplayName}님의 개인 맞춤 링크 목록입니다.
                       </p>
                     </div>
                   </div>
@@ -556,7 +782,7 @@ export default function TossProfilePage() {
 
             {/* 푸터 영역 */}
             <footer className="mt-8 mb-4 text-center lg:text-left text-[12px] text-[#8b95a1] space-y-1 lg:px-2">
-              <p>© {new Date().getFullYear()} {displayName} · MyLink</p>
+              <p>© {new Date().getFullYear()} {currentDisplayName} · MyLink</p>
               <p className="text-[11px] text-[#b0b8c1]">토스 디자인 시스템(TDS) 스타일로 구성된 개인 프로필 공간입니다</p>
             </footer>
           </div>
