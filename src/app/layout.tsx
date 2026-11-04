@@ -15,9 +15,20 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "고은빈 (Eunbin Ko) | Frontend Developer & Creator",
+  title: "MyLink – 나의 모든 링크를 하나의 감각적인 페이지에",
   description:
-    "Next.js와 Tailwind CSS로 제작한 감각적인 반응형 개인 프로필 및 프로젝트 쇼케이스 플랫폼입니다.",
+    "GitHub, 블로그, 포트폴리오, SNS를 하나로 모아보세요. Google 로그인 한 번으로 나만의 퍼스널 링크트리 페이지가 완성됩니다.",
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_BASE_URL || "http://localhost:3000"
+  ),
+  openGraph: {
+    type: "website",
+    siteName: "MyLink (마이링크)",
+    locale: "ko_KR",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
