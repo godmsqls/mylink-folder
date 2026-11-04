@@ -1,0 +1,229 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model
+// ===============================================================
+//
+// Collection: users
+// Document ID: {userId} (matches Firebase Auth UID)
+// Fields:
+//   - uid: string (required, immutable) - Firebase Auth UID
+//   - displayName: string (required, 1-50 chars) - Public display name
+//   - username: string (required, 1-30 chars, alphanumeric/._-) - User handle
+//   - bio: string | null (optional, 0-500 chars) - Self-introduction/biography
+//   - photoURL: string | null (optional, 0-2048 chars, valid http/https URL) - Avatar image
+//   - email: string | null (optional, 0-254 chars, valid email format) - Email address
+//   - updatedAt: number | timestamp (optional, > 0) - Last update time (ms)
+//
+// Collection: users/{userId}/profile
+// Document ID: {profileId} (e.g., 'main')
+// Fields: Same schema as users/{userId}
+//
+// Collection: users/{userId}/links
+// Document ID: {linkId} (auto-generated ID)
+// Fields:
+//   - type: string (required, one of ['link', 'highlight', 'header'])
+//   - title: string (required, 1-100 chars)
+//   - subtitle: string | null (optional, 0-200 chars)
+//   - url: string | null (optional, 0-2048 chars, valid http/https URL)
+//   - iconName: string | null (optional, 0-50 chars)
+//   - badgeText: string | null (optional, 0-30 chars)
+//   - isActive: bool (required)
+//   - order: number (required)
+//   - createdAt: number (required, immutable)
+//   - clickCount: number (optional, >= 0) - Total click count
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    // Check if user owns the path based on userId wildcard
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Validate that the document contains only allowed fields
+    function hasOnlyAllowedFields(allowedFields) {
+      return request.resource.data.keys().hasOnly(allowedFields);
+    }
+
+    // Validate that the document has all required fields
+    function hasRequiredFields(requiredFields) {
+      return request.resource.data.keys().hasAll(requiredFields);
+    }
+
+    // Validate optional or nullable string with length bounds
+    function isValidOptionalString(data, field, maxLen) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is string && data[field].size() <= maxLen);
+    }
+
+    // Validate optional or nullable URL format (http:// or https://)
+    function isValidOptionalUrl(data, field, maxLen) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is string &&
+         data[field].size() <= maxLen &&
+         (data[field].size() == 0 || data[field].matches('^https?://.+')));
+    }
+
+    // Validate optional or nullable email format
+    function isValidOptionalEmail(data, field) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is string &&
+         data[field].size() <= 254 &&
+         (data[field].size() == 0 || data[field].matches('^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$')));
+    }
+
+    // Validate username format (1-30 chars, alphanumeric + _.-)
+    function isValidUsername(username) {
+      return username is string &&
+        username.size() >= 1 &&
+        username.size() <= 30 &&
+        username.matches('^[a-zA-Z0-9_.-]+$');
+    }
+
+    // Validate timestamp or millisecond number
+    function isValidTimestampField(data, field) {
+      return !(field in data) ||
+        data[field] == null ||
+        (data[field] is number && data[field] > 0) ||
+        data[field] is timestamp;
+    }
+
+    // Validate optional non-negative click count
+    function isValidOptionalClickCount(data) {
+      return !('clickCount' in data) ||
+        (data.clickCount is number && data.clickCount >= 0);
+    }
+
+    // Check if the update is only incrementing clickCount by public/unauthenticated visitors
+    function isValidClickIncrement() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['clickCount']) &&
+        'clickCount' in request.resource.data &&
+        request.resource.data.clickCount is number &&
+        request.resource.data.clickCount >= 0 &&
+        (!('clickCount' in resource.data) || request.resource.data.clickCount >= resource.data.clickCount);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    // Domain validator for UserProfile (used in create and update)
+    function isValidUserProfile(data, userId) {
+      return hasOnlyAllowedFields(['uid', 'displayName', 'username', 'bio', 'photoURL', 'email', 'updatedAt']) &&
+        hasRequiredFields(['uid', 'displayName', 'username']) &&
+        data.uid is string &&
+        data.uid == userId &&
+        data.uid == request.auth.uid &&
+        data.displayName is string &&
+        data.displayName.size() >= 1 &&
+        data.displayName.size() <= 50 &&
+        isValidUsername(data.username) &&
+        isValidOptionalString(data, 'bio', 500) &&
+        isValidOptionalUrl(data, 'photoURL', 2048) &&
+        isValidOptionalEmail(data, 'email') &&
+        isValidTimestampField(data, 'updatedAt');
+    }
+
+    // Domain validator for LinkItem (used in create and update)
+    function isValidLink(data) {
+      return hasOnlyAllowedFields(['type', 'title', 'subtitle', 'url', 'iconName', 'badgeText', 'isActive', 'order', 'createdAt', 'clickCount']) &&
+        hasRequiredFields(['type', 'title', 'isActive', 'order', 'createdAt']) &&
+        data.type is string &&
+        data.type in ['link', 'highlight', 'header'] &&
+        data.title is string &&
+        data.title.size() >= 1 &&
+        data.title.size() <= 100 &&
+        data.isActive is bool &&
+        data.order is number &&
+        ((data.createdAt is number && data.createdAt > 0) || data.createdAt is timestamp) &&
+        isValidOptionalString(data, 'subtitle', 200) &&
+        isValidOptionalUrl(data, 'url', 2048) &&
+        isValidOptionalString(data, 'iconName', 50) &&
+        isValidOptionalString(data, 'badgeText', 30) &&
+        isValidOptionalClickCount(data);
+    }
+
+    // ===============================================================
+    // Root Default Deny
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Collection: users/{userId}
+    // ===============================================================
+    match /users/{userId} {
+      // 1. Read: Publicly readable for profile queries and public links
+      allow read: if true;
+
+      // 2. Create: Authenticated owner creating their own profile with validated schema
+      allow create: if isOwner(userId) &&
+        isValidUserProfile(request.resource.data, userId);
+
+      // 3. Update: Authenticated owner updating their profile with immutable UID protection
+      allow update: if isOwner(userId) &&
+        isValidUserProfile(request.resource.data, userId) &&
+        request.resource.data.uid == resource.data.uid;
+
+      // 4. Delete: Explicitly denied to protect user records and avoid broken public pages
+      allow delete: if false;
+
+      // =============================================================
+      // Subcollection: users/{userId}/profile/{profileId}
+      // =============================================================
+      match /profile/{profileId} {
+        // Publicly readable (fallback/synced profile subcollection)
+        allow read: if true;
+
+        allow create: if isOwner(userId) &&
+          isValidUserProfile(request.resource.data, userId);
+
+        allow update: if isOwner(userId) &&
+          isValidUserProfile(request.resource.data, userId) &&
+          request.resource.data.uid == resource.data.uid;
+
+        allow delete: if false;
+      }
+
+      // =============================================================
+      // Subcollection: users/{userId}/links/{linkId}
+      // =============================================================
+      match /links/{linkId} {
+        // Publicly readable for showcasing links on public profile page
+        allow read: if true;
+
+        // Create: Only owner can add links with validated fields
+        allow create: if isOwner(userId) &&
+          isValidLink(request.resource.data);
+
+        // Update:
+        // 1) Authenticated owner can modify their link with full validation (createdAt immutable)
+        // 2) Any user (including unauthenticated public visitors) can increment clickCount
+        allow update: if (
+          isOwner(userId) &&
+          isValidLink(request.resource.data) &&
+          request.resource.data.createdAt == resource.data.createdAt
+        ) || isValidClickIncrement();
+
+        // Delete: Owner can delete their own links
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

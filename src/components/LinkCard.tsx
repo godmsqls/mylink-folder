@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { ChevronRight, Pencil, Trash2, Link2, Sparkles, Hash, X, Check, AlertTriangle } from "lucide-react";
 import { LinkItem } from "@/data/profile";
 import { GithubIcon, LinkedinIcon, InstagramIcon } from "@/components/SocialIcons";
-import { updateLink, deleteLink } from "@/lib/firestore";
+import { updateLink, deleteLink, incrementClickCount } from "@/lib/firestore";
 
 // ────────────────────────────────────────────────────────────
 // 공유 상수 (AddLinkDialog와 동일)
@@ -351,6 +351,24 @@ export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [clickCount, setClickCount] = useState<number>(link.clickCount ?? 0);
+
+  useEffect(() => {
+    setClickCount(link.clickCount ?? 0);
+  }, [link.clickCount]);
+
+  const handleClick = async () => {
+    // 낙관적 UI 업데이트
+    setClickCount((prev) => prev + 1);
+
+    if (userId && link.id) {
+      try {
+        await incrementClickCount(userId, link.id);
+      } catch (err) {
+        console.error("클릭 카운트 증가 실패:", err);
+      }
+    }
+  };
 
   if (!link.isActive) return null;
 
@@ -471,7 +489,8 @@ export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
           <a
             href={link.url}
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
+            onClick={handleClick}
             className="relative flex items-center gap-3.5 z-10 flex-1 min-w-0 transition-transform active:scale-[0.98]"
           >
             <div className="w-10 h-10 rounded-[12px] bg-white border border-[#e5e8eb] flex items-center justify-center flex-shrink-0 shadow-sm">
@@ -482,6 +501,9 @@ export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
               {link.subtitle && (
                 <p className="text-[12px] text-[#4e5968] mt-0.5 truncate">{link.subtitle}</p>
               )}
+              <p className="text-[12px] text-[#8b95a1] mt-0.5 truncate">
+                {link.title} - {clickCount} 클릭
+              </p>
             </div>
           </a>
 
@@ -522,7 +544,8 @@ export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
         <a
           href={link.url}
           target="_blank"
-          rel="noreferrer"
+          rel="noopener noreferrer"
+          onClick={handleClick}
           className="flex items-center gap-3.5 flex-1 min-w-0 p-3.5"
         >
           <div className="w-10 h-10 rounded-[12px] bg-[#f2f4f6] group-hover:bg-white border border-transparent group-hover:border-[#e5e8eb] flex items-center justify-center flex-shrink-0 transition-colors shadow-sm">
@@ -533,6 +556,9 @@ export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
             {link.subtitle && (
               <p className="text-[12px] text-[#8b95a1] truncate">{link.subtitle}</p>
             )}
+            <p className="text-[12px] text-[#8b95a1] mt-0.5 truncate">
+              {link.title} - {clickCount} 클릭
+            </p>
           </div>
         </a>
 

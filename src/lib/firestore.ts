@@ -11,6 +11,7 @@ import {
   getDoc,
   setDoc,
   where,
+  increment,
 } from "firebase/firestore";
 import { app } from "@/lib/firebase";
 import { LinkItem, PROFILE_DATA } from "@/data/profile";
@@ -193,6 +194,7 @@ export async function addLink(userId: string, link: LinkItem): Promise<string> {
     isActive: link.isActive,
     order: link.order,
     createdAt: Date.now(),
+    clickCount: link.clickCount ?? 0,
   });
   return docRef.id;
 }
@@ -206,7 +208,7 @@ export async function updateLink(
   link: Partial<LinkItem>
 ): Promise<void> {
   const docRef = doc(db, "users", userId, "links", id);
-  await updateDoc(docRef, {
+  const payload: Record<string, any> = {
     type: link.type,
     title: link.title,
     subtitle: link.subtitle ?? null,
@@ -215,7 +217,11 @@ export async function updateLink(
     badgeText: link.badgeText ?? null,
     isActive: link.isActive,
     order: link.order,
-  });
+  };
+  if (link.clickCount !== undefined) {
+    payload.clickCount = link.clickCount;
+  }
+  await updateDoc(docRef, payload);
 }
 
 /**
@@ -224,6 +230,20 @@ export async function updateLink(
 export async function deleteLink(userId: string, id: string): Promise<void> {
   const docRef = doc(db, "users", userId, "links", id);
   await deleteDoc(docRef);
+}
+
+/**
+ * 링크 클릭 시 clickCount를 increment(1)로 증가시킵니다.
+ * 경로: users/{userId}/links/{linkId}
+ */
+export async function incrementClickCount(
+  userId: string,
+  linkId: string
+): Promise<void> {
+  const docRef = doc(db, "users", userId, "links", linkId);
+  await updateDoc(docRef, {
+    clickCount: increment(1),
+  });
 }
 
 /**
@@ -245,6 +265,7 @@ export async function fetchLinks(userId: string): Promise<LinkItem[]> {
       isActive: data.isActive,
       order: data.order,
       createdAt: data.createdAt ?? undefined,
+      clickCount: data.clickCount ?? 0,
     } as LinkItem;
   });
 }

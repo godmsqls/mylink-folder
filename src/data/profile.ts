@@ -33,6 +33,7 @@ export interface LinkItem {
   isActive: boolean;
   order: number;
   createdAt?: number;
+  clickCount?: number;
 }
 
 export const PROFILE_DATA = {

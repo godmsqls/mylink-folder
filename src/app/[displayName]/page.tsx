@@ -462,7 +462,7 @@ export default function DisplayNameProfilePage({ params }: PageProps) {
                     </h3>
                     <div className="space-y-2">
                       {activeLinks.slice(0, 3).map((link) => (
-                        <LinkCard key={link.id} link={link} />
+                        <LinkCard key={link.id} link={link} userId={userId || undefined} />
                       ))}
                     </div>
                   </div>
@@ -488,7 +488,7 @@ export default function DisplayNameProfilePage({ params }: PageProps) {
                         ? activeLinks.filter((l) => l.type === "highlight" || l.type === "link")
                         : activeLinks
                       ).map((link) => (
-                        <LinkCard key={link.id} link={link} />
+                        <LinkCard key={link.id} link={link} userId={userId || undefined} />
                       ))}
                     </div>
                   )}
