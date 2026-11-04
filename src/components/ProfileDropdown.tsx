@@ -10,6 +10,7 @@ import {
   LogOut,
   ChevronDown,
   Sparkles,
+  BarChart3,
 } from "lucide-react";
 
 interface ProfileDropdownProps {
@@ -162,6 +163,23 @@ export function ProfileDropdown({
                 <span className="block leading-tight">마이링크 편집기</span>
                 <span className="text-[10px] text-[#8b95a1] block">
                   프로필 & 링크 관리
+                </span>
+              </div>
+            </Link>
+
+            {/* 통계 페이지 이동 */}
+            <Link
+              href="/stats"
+              onClick={() => setIsOpen(false)}
+              className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-[12px] text-[13px] font-semibold text-[#4e5968] hover:bg-[#e8f3ff] hover:text-[#3182f6] transition-colors group"
+            >
+              <div className="w-7 h-7 rounded-[8px] bg-[#e8f3ff] text-[#3182f6] flex items-center justify-center shrink-0">
+                <BarChart3 className="w-3.5 h-3.5" />
+              </div>
+              <div className="text-left">
+                <span className="block leading-tight group-hover:text-[#3182f6]">통계 대시보드</span>
+                <span className="text-[10px] text-[#8b95a1] group-hover:text-[#3182f6]/70 block">
+                  클릭수 & 링크 통계 분석
                 </span>
               </div>
             </Link>
