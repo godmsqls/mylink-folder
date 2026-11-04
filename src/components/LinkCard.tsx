@@ -376,34 +376,41 @@ export function LinkCard({ link, userId, onUpdate, onDelete }: LinkCardProps) {
   };
 
   // ── 공통 액션 버튼 바
-  const ActionButtons = ({ dark = false }: { dark?: boolean }) => (
-    <div className="flex items-center gap-1 flex-shrink-0">
-      <button
-        type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(true); }}
-        aria-label="수정"
-        className={`w-7 h-7 rounded-[8px] flex items-center justify-center transition-colors cursor-pointer ${
-          dark
-            ? "text-white/80 hover:bg-white/20 active:bg-white/30"
-            : "text-[#8b95a1] hover:bg-[#e5e8eb] hover:text-[#4e5968] active:bg-[#d1d6db]"
-        }`}
-      >
-        <Pencil className="w-3.5 h-3.5" />
-      </button>
-      <button
-        type="button"
-        onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowDeleteModal(true); }}
-        aria-label="삭제"
-        className={`w-7 h-7 rounded-[8px] flex items-center justify-center transition-colors cursor-pointer ${
-          dark
-            ? "text-white/80 hover:bg-white/20 active:bg-white/30"
-            : "text-[#8b95a1] hover:bg-red-50 hover:text-[#f04452] active:bg-red-100"
-        }`}
-      >
-        <Trash2 className="w-3.5 h-3.5" />
-      </button>
-    </div>
-  );
+  const ActionButtons = ({ dark = false }: { dark?: boolean }) => {
+    if (!onUpdate && !onDelete) return null;
+    return (
+      <div className="flex items-center gap-1 flex-shrink-0">
+        {onUpdate && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setIsEditing(true); }}
+            aria-label="수정"
+            className={`w-7 h-7 rounded-[8px] flex items-center justify-center transition-colors cursor-pointer ${
+              dark
+                ? "text-white/80 hover:bg-white/20 active:bg-white/30"
+                : "text-[#8b95a1] hover:bg-[#e5e8eb] hover:text-[#4e5968] active:bg-[#d1d6db]"
+            }`}
+          >
+            <Pencil className="w-3.5 h-3.5" />
+          </button>
+        )}
+        {onDelete && (
+          <button
+            type="button"
+            onClick={(e) => { e.preventDefault(); e.stopPropagation(); setShowDeleteModal(true); }}
+            aria-label="삭제"
+            className={`w-7 h-7 rounded-[8px] flex items-center justify-center transition-colors cursor-pointer ${
+              dark
+                ? "text-white/80 hover:bg-white/20 active:bg-white/30"
+                : "text-[#8b95a1] hover:bg-red-50 hover:text-[#f04452] active:bg-red-100"
+            }`}
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+    );
+  };
 
   // ══════════════════════════════════════════
   // 인라인 편집 중일 때

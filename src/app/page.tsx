@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import {
   Mail,
   ExternalLink,
@@ -28,6 +29,7 @@ import { UserProfile } from "@/lib/firestore";
 import { useAuth } from "@/lib/auth-context";
 import { InlineEditableField } from "@/components/InlineEditableField";
 import { AvatarEditable } from "@/components/AvatarEditable";
+import { ProfileDropdown } from "@/components/ProfileDropdown";
 import { useQueryClient } from "@tanstack/react-query";
 import { useLinkquery, useLinkMutations } from "@/hooks/useLinks";
 import { useProfileQuery, useProfileMutation } from "@/hooks/useProfile";
@@ -166,8 +168,9 @@ export default function TossProfilePage() {
 
   const handleShareProfile = () => {
     if (typeof window !== "undefined") {
-      navigator.clipboard.writeText(window.location.href);
-      showToast("프로필 링크를 복사했어요", "success");
+      const shareUrl = `${window.location.origin}/${encodeURIComponent(currentDisplayName)}`;
+      navigator.clipboard.writeText(shareUrl);
+      showToast("개인 프로필 링크를 복사했어요", "success");
     }
   };
 
@@ -260,47 +263,45 @@ export default function TossProfilePage() {
         {/* 상단 네비게이션 헤더 (TDS TopBar, 56pt) */}
         <header className="sticky top-0 z-30 h-14 bg-white/90 backdrop-blur-md px-4 sm:px-5 flex items-center justify-between border-b border-[#e5e8eb]/60 lg:max-w-[1024px] lg:mx-auto lg:w-full lg:bg-transparent lg:backdrop-blur-none lg:border-none lg:px-8 lg:pt-6 lg:pb-2">
           {/* 좌측: 로고 및 사용자 이름 */}
-          <div className="flex items-center gap-2 shrink-0">
+          <Link
+            href="/"
+            className="flex items-center gap-2 shrink-0 group hover:opacity-85 transition-opacity"
+          >
             <div className="w-6 h-6 rounded-full bg-[#3182f6] flex items-center justify-center text-white text-[13px] font-bold">
               {currentDisplayName[0] || "M"}
             </div>
             <span className="text-[16px] sm:text-[17px] font-bold text-[#191f28]">
               {currentDisplayName}
             </span>
-          </div>
+          </Link>
 
-          {/* 우측: 로그인 사용자 상태 및 프로필 공유 버튼 */}
+          {/* 우측: 내 페이지 바로가기 링크 + 프로필 드롭다운 + 프로필 공유 버튼 */}
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] bg-white border border-[#e5e8eb] shadow-2xs">
-                {currentAvatar ? (
-                  <img
-                    src={currentAvatar}
-                    alt={currentDisplayName}
-                    referrerPolicy="no-referrer"
-                    className="w-4.5 h-4.5 rounded-full object-cover shrink-0"
-                  />
-                ) : (
-                  <div className="w-4.5 h-4.5 rounded-full bg-[#3182f6] text-white text-[10px] font-bold flex items-center justify-center shrink-0">
-                    {currentDisplayName[0] || "유"}
-                  </div>
-                )}
-                <span className="text-[12px] sm:text-[13px] font-semibold text-[#191f28] max-w-[80px] sm:max-w-[120px] truncate">
-                  {currentDisplayName}님
-                </span>
-              </div>
-              <button
-                onClick={handleSignOut}
-                className="h-8 px-2 sm:px-2.5 rounded-[8px] text-[12px] font-medium text-[#6b7684] hover:text-[#191f28] hover:bg-[#e5e8eb] active:bg-[#d1d6db] transition-colors cursor-pointer"
-              >
-                로그아웃
-              </button>
-            </div>
+            {/* 개인별 페이지 바로가기 버튼 (헤더 직접 이동) */}
+            <Link
+              href={`/${encodeURIComponent(currentDisplayName)}`}
+              target="_blank"
+              rel="noreferrer"
+              className="hidden sm:flex items-center gap-1.5 h-8.5 px-3 rounded-[10px] bg-white border border-[#e5e8eb] text-[12px] font-bold text-[#3182f6] hover:bg-[#e8f3ff] hover:border-[#3182f6]/30 transition-all shadow-2xs group"
+              title="내 개인별 페이지 새 창으로 열기"
+            >
+              <span>내 페이지</span>
+              <ExternalLink className="w-3.5 h-3.5 text-[#3182f6] group-hover:translate-x-0.5 transition-transform" />
+            </Link>
 
+            {/* 프로필 드롭다운 (개인별 페이지 이동, 에디터 홈, 로그아웃 포함) */}
+            <ProfileDropdown
+              displayName={currentDisplayName}
+              email={currentEmail}
+              photoURL={currentAvatar}
+              onSignOut={handleSignOut}
+            />
+
+            {/* 프로필 공유 링크 복사 버튼 */}
             <button
               onClick={handleShareProfile}
               aria-label="프로필 링크 복사"
-              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-[#4e5968] hover:bg-[#e5e8eb] active:bg-[#d1d6db] transition-colors cursor-pointer lg:bg-white lg:shadow-2xs shrink-0"
+              className="w-8.5 h-8.5 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-[#4e5968] hover:bg-[#e5e8eb] active:bg-[#d1d6db] transition-colors cursor-pointer bg-white shadow-2xs shrink-0 border border-[#e5e8eb]/60"
             >
               <Share2 className="w-4 h-4" />
             </button>

@@ -28,26 +28,6 @@ export interface UserProfile {
 }
 
 /**
- * Firestore users/{userId} 경로에서 사용자 프로필을 조회합니다.
- */
-export async function getUserProfile(userId: string): Promise<UserProfile | null> {
-  const userDoc = await getDoc(doc(db, "users", userId));
-  if (!userDoc.exists()) {
-    return null;
-  }
-  const data = userDoc.data();
-  return {
-    uid: userId,
-    displayName: data.displayName || "",
-    username: data.username || "",
-    bio: data.bio || "",
-    photoURL: data.photoURL || "",
-    email: data.email || "",
-    updatedAt: data.updatedAt,
-  };
-}
-
-/**
  * firestore users 컬렉션에서 동일한 displayName을 가진 다른 사용자 문서가 존재하는지 조회합니다.
  * @param userId 현재 사용자 uid (자신의 문서는 중복 검사 대상에서 제외)
  * @param displayName 중복 검사할 표시 이름
@@ -69,21 +49,91 @@ export async function checkDisplayNameDuplicate(
 }
 
 /**
- * Firestore users/{userId} 경로에 사용자 프로필 데이터를 저장(생성/병합)합니다.
+ * displayName으로 userId(문서 ID)를 검색합니다 (where 쿼리).
+ * @param displayName 검색할 표시 이름
+ * @returns 일치하는 사용자의 userId 또는 null
+ */
+export async function getUserIdByDisplayName(
+  displayName: string
+): Promise<string | null> {
+  const cleanName = decodeURIComponent(displayName).trim();
+  if (!cleanName) return null;
+
+  const usersRef = collection(db, "users");
+  const q = query(usersRef, where("displayName", "==", cleanName));
+  const snap = await getDocs(q);
+
+  if (snap.empty) {
+    return null;
+  }
+
+  return snap.docs[0].id;
+}
+
+/**
+ * Firestore users/{userId}/profile 또는 users/{userId} 경로에서 사용자 프로필을 조회합니다.
+ */
+export async function getUserProfile(userId: string): Promise<UserProfile | null> {
+  // 1. users/{userId}/profile 서브컬렉션 조회 (우선 순위)
+  try {
+    const profileSubCol = collection(db, "users", userId, "profile");
+    const profileSubSnap = await getDocs(profileSubCol);
+    if (!profileSubSnap.empty) {
+      const data = profileSubSnap.docs[0].data();
+      return {
+        uid: userId,
+        displayName: data.displayName || "",
+        username: data.username || "",
+        bio: data.bio || "",
+        photoURL: data.photoURL || "",
+        email: data.email || "",
+        updatedAt: data.updatedAt,
+      };
+    }
+  } catch (e) {
+    console.warn("users/{userId}/profile subcollection lookup failed:", e);
+  }
+
+  // 2. 기본 users/{userId} 문서 조회
+  const userDoc = await getDoc(doc(db, "users", userId));
+  if (!userDoc.exists()) {
+    return null;
+  }
+  const data = userDoc.data();
+  return {
+    uid: userId,
+    displayName: data.displayName || "",
+    username: data.username || "",
+    bio: data.bio || "",
+    photoURL: data.photoURL || "",
+    email: data.email || "",
+    updatedAt: data.updatedAt,
+  };
+}
+
+/**
+ * Firestore users/{userId}/profile 또는 users/{userId} 경로에 사용자 프로필 데이터를 저장(생성/병합)합니다.
  */
 export async function saveUserProfile(
   userId: string,
   profile: Partial<UserProfile>
 ): Promise<void> {
+  const profilePayload = {
+    ...profile,
+    updatedAt: Date.now(),
+  };
+
+  // 1. users/{userId} 문서 저장
   const userDocRef = doc(db, "users", userId);
-  await setDoc(
-    userDocRef,
-    {
-      ...profile,
-      updatedAt: Date.now(),
-    },
-    { merge: true }
-  );
+  await setDoc(userDocRef, profilePayload, { merge: true });
+
+  // 2. users/{userId}/profile/main 서브컬렉션 문서에도 동기화 저장
+  try {
+    const profileDocRef = doc(db, "users", userId, "profile", "main");
+    await setDoc(profileDocRef, profilePayload, { merge: true });
+  } catch (e) {
+    console.warn("Saving to users/{userId}/profile failed:", e);
+  }
 }
 
 /**
